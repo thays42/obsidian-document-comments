@@ -21,6 +21,7 @@ import { addComment, insertCommentInFile } from "./editor/commands";
 import { findHighlightAtSelection } from "./editor/edits";
 import { findSectionRange, highlightPostProcessor, mapReadingSelection } from "./reading/highlight";
 import { ReadingDeps, ReadingMarginManager } from "./reading/margin";
+import { ReadingSelectionCache } from "./reading/selection-cache";
 import { COMMENTS_VIEW_TYPE, CommentsSidebarView, SidebarDeps } from "./ui/sidebar";
 import { CommentModal } from "./ui/comment-modal";
 import { DEFAULT_SETTINGS, DocCommentsSettings, DocCommentsSettingTab } from "./settings";
@@ -31,6 +32,7 @@ export default class DocCommentsPlugin extends Plugin {
 	private markdown = new Component();
 	private ribbonIcon: HTMLElement | null = null;
 	private readingManager: ReadingMarginManager | null = null;
+	private selectionCache: ReadingSelectionCache | null = null;
 	private scheduleReadingRefresh: () => void = () => {};
 	/** True while the "All discussions" sidebar panel is mounted. */
 	private sidebarOpen = false;
@@ -117,6 +119,11 @@ export default class DocCommentsPlugin extends Plugin {
 		// even if layout-change doesn't.
 		this.registerEvent(this.app.workspace.on("resize", () => this.syncSidebarOpen()));
 		this.registerEvent(this.app.vault.on("modify", () => this.scheduleReadingRefresh()));
+		// iOS collapses the selection on the tap needed to invoke a command (palette
+		// or mobile toolbar), so the command sees nothing by the time it runs. Cache
+		// the last non-empty selection and restore it at command time instead.
+		this.selectionCache = new ReadingSelectionCache(activeDocument);
+		this.registerDomEvent(activeDocument, "selectionchange", () => this.selectionCache?.capture());
 
 		this.addCommand({
 			id: "add-comment",
@@ -212,6 +219,7 @@ export default class DocCommentsPlugin extends Plugin {
 	/** Reading view has no editor surface, so map the rendered selection back to
 	 *  source offsets (best-effort) and prompt for the comment text. */
 	private startAddCommentReading(view: MarkdownView): void {
+		this.selectionCache?.restoreIfCollapsed();
 		const selection = activeWindow.getSelection();
 		const selected = selection?.toString() ?? "";
 		if (!selection || selection.rangeCount === 0 || !selected.trim()) {
@@ -289,7 +297,12 @@ export default class DocCommentsPlugin extends Plugin {
 			targetHighlightId,
 		);
 		result.match({
-			ok: () => this.scheduleReadingRefresh(),
+			ok: () => {
+				this.scheduleReadingRefresh();
+				// The selection that seeded this comment is now spent — don't let it
+				// silently answer a later invocation whose own selection got collapsed.
+				this.selectionCache?.clear();
+			},
 			err: (message) => new Notice(`Couldn't add the comment: ${message}`),
 		});
 		return result.map(() => undefined);
