@@ -78,19 +78,25 @@ describe("ReadingSelectionCache", () => {
 
 	// The class has no notion of "recently" — it cannot tell a selection collapsed
 	// a moment ago by the tap that invoked this command from one collapsed long
-	// before, for an unrelated reason. That's why callers must gate this cache
-	// behind Platform.isMobile: on desktop, an empty selection later in the
-	// session would otherwise be silently answered with whatever was last
-	// selected, anchoring a comment to text the user isn't looking at.
-	it("restores a stale range on any later empty-selection check, not just the tap that collapsed it — why callers must gate this behind Platform.isMobile", () => {
+	// before, for an unrelated reason. A single restore proves nothing about that:
+	// this drives restoreIfCollapsed() a second time, with no intervening capture(),
+	// to show the same cached range answers an unrelated later invocation too. That
+	// blindness is exactly why callers must gate this cache behind Platform.isMobile:
+	// on desktop, an empty selection later in the session would otherwise be silently
+	// answered with whatever was last selected, anchoring a comment to text the user
+	// isn't looking at.
+	it("keeps answering later empty-selection checks from the same capture, with no notion of how much time has passed — why callers must gate this behind Platform.isMobile", () => {
 		const { target, selection } = setup("<p>ship on Friday</p>");
 		const cache = new ReadingSelectionCache(document);
 
 		select(selection, target);
 		cache.capture();
 
-		selection.removeAllRanges(); // an unrelated later command, not the original tap
+		selection.removeAllRanges(); // the tap that invoked the first command
+		expect(cache.restoreIfCollapsed()).toBe(true);
+		expect(selection.toString()).toBe("ship on Friday");
 
+		selection.removeAllRanges(); // an unrelated later invocation, no new capture()
 		expect(cache.restoreIfCollapsed()).toBe(true);
 		expect(selection.toString()).toBe("ship on Friday");
 	});
