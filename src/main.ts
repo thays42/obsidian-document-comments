@@ -119,11 +119,15 @@ export default class DocCommentsPlugin extends Plugin {
 		// even if layout-change doesn't.
 		this.registerEvent(this.app.workspace.on("resize", () => this.syncSidebarOpen()));
 		this.registerEvent(this.app.vault.on("modify", () => this.scheduleReadingRefresh()));
-		// iOS collapses the selection on the tap needed to invoke a command (palette
-		// or mobile toolbar), so the command sees nothing by the time it runs. Cache
-		// the last non-empty selection and restore it at command time instead.
-		this.selectionCache = new ReadingSelectionCache(activeDocument);
-		this.registerDomEvent(activeDocument, "selectionchange", () => this.selectionCache?.capture());
+		if (Platform.isMobile) {
+			// iOS collapses the selection on the tap needed to invoke a command (palette
+			// or mobile toolbar), so the command sees nothing by the time it runs. Cache
+			// the last non-empty selection and restore it at command time instead. Desktop
+			// selection doesn't collapse this way, so the cache stays null there and
+			// `restoreIfCollapsed()` below is a no-op via optional chaining.
+			this.selectionCache = new ReadingSelectionCache(activeDocument);
+			this.registerDomEvent(activeDocument, "selectionchange", () => this.selectionCache?.capture());
+		}
 
 		this.addCommand({
 			id: "add-comment",
